@@ -643,6 +643,11 @@ def recog(args):
     assert isinstance(model, ASRInterface)
     model.recog_args = args
 
+    print(args.penalty)
+    print(args.ctc_weight)
+    print(args.lm_weight)
+    print(args.rnnlm, args.rnnlm_conf)
+
     # read rnnlm
     if args.rnnlm:
         rnnlm_args = get_model_conf(args.rnnlm, args.rnnlm_conf)

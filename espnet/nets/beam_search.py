@@ -62,14 +62,17 @@ class BeamSearch(torch.nn.Module):
         self.part_scorers = dict()
         self.nn_dict = torch.nn.ModuleDict()
         for k, v in scorers.items():
+            logging.debug("scorers: " + str(scorers.keys()))
             w = weights.get(k, 0)
             if w == 0 or v is None:
                 continue
             assert isinstance(v, ScorerInterface), f"{k} ({type(v)}) does not implement ScorerInterface"
             if isinstance(v, PartialScorerInterface):
                 self.part_scorers[k] = v
+                logging.debug(k + "is a pratial scorer")
             else:
                 self.full_scorers[k] = v
+                logging.debug(k + "is a full scorer")
             if isinstance(v, torch.nn.Module):
                 self.nn_dict[k] = v
 
@@ -250,6 +253,9 @@ class BeamSearch(torch.nn.Module):
         """Get top `self.beam_size` hypothesis."""
         return sorted(hyps, key=lambda x: x.score, reverse=True)[:min(len(hyps), self.beam_size)]
 
+    def map_idx_to_word(self, idx_list):
+        return list(map(lambda x: self.token_list[x], idx_list))
+
     def forward(self, x: torch.Tensor, maxlenratio: float = 0.0, minlenratio: float = 0.0) -> List[Hypothesis]:
         """Perform beam search.
 
@@ -277,12 +283,16 @@ class BeamSearch(torch.nn.Module):
         running_hyps = [self.init_hyp(x)]
         ended_hyps = []
         for i in range(maxlen):
-            logging.debug('position ' + str(i))
+            logging.debug('beam search len ' + str(i))
             best = []
             for hyp in running_hyps:
+                logging.debug("prefix: " + str(self.map_idx_to_word(hyp.yseq)) + ", score: " + str(hyp.score))
+                # logging.debug("prefix: " + str(hyp.yseq) + ", score: " + str(hyp.score))
                 scores, states = self.score(hyp, x)
                 part_ids = self.pre_beam(scores, device=x.device)
+                logging.debug("  got new chars: " + str(self.map_idx_to_word(part_ids.numpy())))
                 part_scores, part_states = self.score_partial(hyp, part_ids, x)
+                logging.debug("  part scores: " + str(part_scores))
 
                 # weighted sum scores
                 weighted_scores = torch.zeros(self.n_vocab, dtype=x.dtype, device=x.device)
@@ -294,6 +304,15 @@ class BeamSearch(torch.nn.Module):
 
                 # update hyps
                 for j, part_j in zip(*self.main_beam(weighted_scores, part_ids)):
+                    word = self.map_idx_to_word([j])[0]
+                    logging.debug("  {word} socre:{score:.4f}, ctc_score:{ctc_score:.4f}, att_score:{att_score:.4f}, lm_score:{lm_score:.4f}".format(
+                        word=word,
+                        score=weighted_scores[j],
+                        ctc_score=part_scores["ctc"][part_j],
+                        att_score=scores["decoder"][j],
+                        lm_score=scores["lm"][j],
+                    ))
+
                     # will be (2 x beam at most)
                     best.append(Hypothesis(
                         score=(weighted_scores[j]),
@@ -303,6 +322,9 @@ class BeamSearch(torch.nn.Module):
 
                 # sort and prune 2 x beam -> beam
                 best = self.top_beam_hyps(best)
+
+            if(i == 3):
+                raise RuntimeError("Debug Early Stop!")
 
             # post process of one iteration
             running_hyps = self.post_process(i, maxlen, maxlenratio, best, ended_hyps)
@@ -355,6 +377,7 @@ class BeamSearch(torch.nn.Module):
                     s = d.final_score(hyp.states[k])
                     hyp.scores[k] += s
                     hyp = hyp._replace(score=hyp.score + self.weights[k] * s)
+                logging.debug(f'added to ended hypothesis: {str(str(self.map_idx_to_word(hyp.yseq.numpy())))}')
                 ended_hyps.append(hyp)
             else:
                 remained_hyps.append(hyp)
@@ -363,7 +386,7 @@ class BeamSearch(torch.nn.Module):
             logging.info(f'end detected at {i}')
             return []
         if len(remained_hyps) > 0:
-            logging.debug(f'remeined hypothes: {len(remained_hyps)}')
+            logging.debug(f'remeined hypothesis: {len(remained_hyps)}')
         return remained_hyps
 
 

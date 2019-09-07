@@ -194,6 +194,8 @@ class CTCPrefixScoreTH(object):
         return r_new, s_new, f_min, f_max
 
 
+first_call = True
+
 class CTCPrefixScore(object):
     """Compute CTC label sequence scores
 
@@ -233,6 +235,8 @@ class CTCPrefixScore(object):
         :param r_prev: previous CTC state
         :return ctc_scores, ctc_states
         """
+        global first_call
+
         # initialize CTC states
         output_length = len(y) - 1  # ignore sos
         # new CTC states are prepared as a frame x (n or b) x n_labels tensor
@@ -244,6 +248,9 @@ class CTCPrefixScore(object):
             r[0, 1] = self.logzero
         else:
             r[output_length - 1] = self.logzero
+
+        if first_call:
+            print(y, cs, output_length, r_prev.T)
 
         # prepare forward probabilities for the last label
         r_sum = self.xp.logaddexp(r_prev[:, 0], r_prev[:, 1])  # log(r_t^n(g) + r_t^b(g))
@@ -276,4 +283,12 @@ class CTCPrefixScore(object):
 
         # return the log prefix probability and CTC states, where the label axis
         # of the CTC states is moved to the first axis to slice it easily
+
+        # print("    >>>> log_psi: ", log_psi)
+        # temp = self.xp.rollaxis(r, 2)[0].T.tolist()
+        # print("    >>>> r_n: ", temp[0])
+        # print("    >>>>", "#"*40)
+        # print("    >>>> r_b: ", temp[1])
+
+        first_call = False
         return log_psi, self.xp.rollaxis(r, 2)
